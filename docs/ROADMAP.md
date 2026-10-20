@@ -17,8 +17,8 @@ Order of work for the rowboat. `SPEC.md` has the details of each step.
 - [x] Compiles with `tools/lslcheck.sh`, at least 15 KB free.
 
 ## 2. Animations (`tools/make_anims.py`, `anims/`)
-- [ ] `.anim` writer, driver and passenger poses from named angles, forward-kinematics hand placement.
-- [ ] `anims/rowboat_driver.anim`, `anims/rowboat_passenger.anim`, `anims/preview.png`.
+- [x] `.anim` writer, driver and passenger poses from named angles, forward-kinematics hand placement.
+- [x] `anims/rowboat_driver.anim`, `anims/rowboat_passenger.anim`, `anims/preview.png`.
 
 ## 3. Checks
 - [ ] `tools/sim/boat_sim.py`, `tools/sim/anim_test.py`, CI workflow runs them with `tools/lslcheck.sh`.
