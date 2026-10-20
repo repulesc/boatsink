@@ -69,13 +69,22 @@ integer nudge;                // TRUE while a nudge menu is open: the boat holds
 float   heldAt;
 integer fine;                 // nudge step: FALSE = 5 cm / 5 degrees, TRUE = 1 cm / 1 degree
 
-// a number as text with exactly d (3 or 4) decimals, for Linkset Data
+// a number as text with exactly d (3 or 4) decimals, for Linkset Data (built from whole numbers: (string)float is only
+// good to about 7 digits, so cutting it short could round the wrong way)
 string fix(float x, integer d)
 {
-    float m = 1000.0;
-    if (d == 4) m = 10000.0;
-    string s = (string)((float)llRound(x * m) / m);
-    return llGetSubString(s, 0, llSubStringIndex(s, ".") + d);
+    integer m = 1000;
+    if (d == 4) m = 10000;
+    integer n = llRound(x * m);
+    string sign = "";
+    if (n < 0)
+    {
+        sign = "-";
+        n = -n;
+    }
+    string f = (string)(n % m);
+    while (llStringLength(f) < d) f = "0" + f;
+    return sign + (string)(n / m) + "." + f;
 }
 
 float wave(float t, float period)
