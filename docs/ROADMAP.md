@@ -9,12 +9,12 @@ Order of work for the rowboat. `SPEC.md` has the details of each step.
       Data, sink when anyone sits.
 
 ## 1. Script v2 (`src/rowboat.lsl`)
-- [ ] Settings layer: read/write `lift`, `drift`, `sink`, `seat1`, `seat2` (Linkset Data), with defaults.
-- [ ] Waterline menu: Up/Down 5 and 1 cm, Align, Save, Default. Fix the Align jump (`t0`).
-- [ ] Two seats: `Seat2` lookup, `llLinkSitTarget`, sitter tracking, animation permission queue.
-- [ ] Nudge menu per seat: live move, step toggle, Save, Reset, Done; boat holds still meanwhile.
-- [ ] Drift and Sink toggles (drift eases in and out).
-- [ ] Compiles with `tools/lslcheck.sh`, at least 15 KB free.
+- [x] Settings layer: read/write `lift`, `drift`, `sink`, `seat1`, `seat2` (Linkset Data), with defaults.
+- [x] Waterline menu: Up/Down 5 and 1 cm, Align, Save, Default. Fix the Align jump (`t0`).
+- [x] Two seats: `Seat2` lookup, `llLinkSitTarget`, sitter tracking, animation permission queue.
+- [x] Nudge menu per seat: live move, step toggle, Save, Reset, Done; boat holds still meanwhile.
+- [x] Drift and Sink toggles (drift eases in and out).
+- [x] Compiles with `tools/lslcheck.sh`, at least 15 KB free.
 
 ## 2. Animations (`tools/make_anims.py`, `anims/`)
 - [ ] `.anim` writer, driver and passenger poses from named angles, forward-kinematics hand placement.
