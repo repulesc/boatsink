@@ -3,13 +3,15 @@
 // kind of motion while the boat is selected. Where the boat is when the script starts is home.
 // SEATS: the root prim is the driver seat; a child prim named Seat2 (small, invisible, linked to the boat) is the
 // passenger seat. Without it the boat has one seat. Animations "rowboat_driver" and "rowboat_passenger" go in the root.
-// OWNER MENU: right-click the boat > Touch (or say /9 boat). Only the owner gets it. Guests just left-click to sit.
+// OWNER MENU: it opens by itself when the script starts (and on right-click > Touch, or /9 boat) and stays open until you
+// press Finish or Close. The boat holds still while it is open, so it stays wherever you move it. Only the owner gets it.
+// Guests just left-click to sit.
 // What the menu saves lives in the boat itself (Linkset Data), so it survives script resets and copies.
 // The boat is moved with keyframed motion (non-physical, smooth, run by the simulator), so it cannot be pushed away,
 // cannot wander off the parcel, and always rides at the water level of the region.
 
 // ---- Floating ----
-float DRAFT         = 0.30;   // m, how deep the bottom of the hull sits in the water at first (the boat's size is measured)
+float DRAFT         = 0.15;   // m, how deep the bottom of the hull sits under the water at first (Up / Down in the menu adjust it)
 float HEAVE         = 0.035;  // m, up-and-down bob (Second Life water is flat: keep it very small)
 float ROLL_DEG      = 2.0;    // side-to-side rock
 float PITCH_DEG     = 0.8;    // bow-to-stern rock
@@ -33,6 +35,9 @@ float  SEAT2_YAW    = 180.0;                // faces the driver
 string SEAT2_NAME   = "Seat2";              // name of the child prim that carries the second sit target
 string ANIM_DRIVER    = "rowboat_driver";
 string ANIM_PASSENGER = "rowboat_passenger";
+// ---- Menu and editing ----
+float MENU_AGAIN    = 120.0;  // s without a button before the dialog is sent again (it stays open until Finish or Close)
+float MOVED         = 0.15;   // m the boat may be off the place its motion says before it counts as moved by hand
 
 float   FRAME  = 0.6;         // s per keyframe (27/45 s: keyframe times should be whole multiples of 1/45 s)
 integer FRAMES = 10;          // keyframes per batch: a new 6 s batch is sent each time the last one ends
@@ -41,7 +46,7 @@ vector  home;
 float   homeYaw;
 float   hullLow;              // m the hull bottom is below the root prim's centre (a minus number)
 float   lift;                 // m from the water surface up to the root prim's centre (saved as "lift")
-float   t0;                   // the motion starts from the neutral pose at this time (start, Align, end of a nudge)
+float   t0;                   // the motion starts from the neutral pose at this time (start, Align, or when the boat was moved by hand)
 integer seated;               // anyone sits in either seat
 integer driftOn;
 integer sinkOn;
@@ -61,12 +66,12 @@ list    queue;                // [avatar, seat, ...] waiting for animation permi
 key     permFor;              // the avatar the open permission request is for, NULL_KEY = none
 integer permSeat;
 float   permAt;
-// menus: 0 none, 1 main, 2 waterline, 3 driver nudge, 4 passenger nudge
+// menus: 0 none, 1 main, 2 waterline, 3 driver seat, 4 passenger seat
 integer menu;
 integer menuChan;             // dialog channel; 0 until the script is set up
 integer menuListen;
-float   menuUntil;
-integer nudge;                // TRUE while a nudge menu is open: the boat holds still
+float   menuNext;             // when the dialog is sent again if no button was pressed
+integer held;                 // TRUE while a menu is open: the boat holds still
 float   heldAt;
 integer fine;                 // nudge step: FALSE = 5 cm / 5 degrees, TRUE = 1 cm / 1 degree
 
@@ -154,10 +159,29 @@ settle()
     driftT = t;
 }
 
-// plan the next 6 s of motion from where the boat really is, and play it (not while a nudge menu holds it still)
+// has the boat been moved by hand (or held where it was by the editor)? Then it stays where it is: that is its home now,
+// instead of gliding back to the old one. The motion always knows where the boat should be, so a boat that is somewhere
+// else was moved.
+adoptMove()
+{
+    float t = llGetTime();
+    vector pos = llGetPos();
+    float s = sunkAfter(t - batchStart);
+    vector off = pos - llList2Vector(pose(t - t0, s, driftAfter(t - driftT), pos), 0);
+    if (llVecMag(<off.x, off.y, 0.0>) < MOVED && llFabs(off.z) < MOVED) return;
+    vector e = llRot2Euler(llGetRot());
+    homeYaw = e.z;
+    home = pos;
+    t0 = t;                                   // the motion starts from the neutral pose here
+    // afloat, a new height is the new waterline (Save keeps it); a boat that is sinking keeps its height
+    if (s < 0.001 && llFabs(off.z) >= MOVED) lift += off.z;
+}
+
+// plan the next 6 s of motion from where the boat really is, and play it (not while a menu holds it still)
 nextBatch()
 {
-    if (nudge) return;
+    if (held) return;
+    adoptMove();
     settle();
     batchSeated = seated && sinkOn;
     vector start = llGetPos();
@@ -182,46 +206,51 @@ nextBatch()
 // stop the motion and plan again now (after a change of height, sinking or wander)
 replan()
 {
-    if (nudge) return;
+    if (held) return;
     llSetKeyframedMotion([], []);
     nextBatch();
 }
 
-// a nudge menu opens: the boat holds still, and the clock of the motion stops with it
+// a menu opens: the boat holds still, and the clock of the motion stops with it
 holdStill()
 {
-    if (nudge) return;
+    if (held) return;
     settle();
     heldAt = batchStart;
-    nudge = TRUE;
+    held = TRUE;
     llSetKeyframedMotion([], []);
-    llOwnerSay("The boat holds still while the nudge menu is open. Done (or 60 s without a button) lets it move again.");
 }
 
-// the nudge menu is over: carry on from the pose where the boat stopped, without a jump
-endNudge()
+// the menu is over: carry on from where the boat is (a boat moved meanwhile stays there), without a jump
+endHold()
 {
     float t = llGetTime();
     t0 += t - heldAt;
     batchStart = t;
     driftT = t;
-    nudge = FALSE;
+    held = FALSE;
     nextBatch();
 }
 
 // put the boat on the water level where it is, level it, and make this its home
-align()
+place()
 {
-    llSetKeyframedMotion([], []);
     vector e = llRot2Euler(llGetRot());
     homeYaw = e.z;
     home = llGetPos();
     home.z = llWater(ZERO_VECTOR) + lift;
     llSetLinkPrimitiveParamsFast(LINK_THIS, [PRIM_POSITION, home, PRIM_ROTATION, llEuler2Rot(<0.0, 0.0, homeYaw>)]);
+}
+
+align()
+{
+    llSetKeyframedMotion([], []);
+    place();
     t0 = llGetTime();                         // the motion starts from the neutral pose here: no leap, no swing
     batchStart = t0;
     driftT = t0;
     batchSunk = 0.0;
+    if (held) heldAt = t0;
     nextBatch();
 }
 
@@ -376,7 +405,15 @@ closeMenu()
     llListenRemove(menuListen);
     menuListen = 0;
     menu = 0;
-    if (nudge) endNudge();
+    if (held) endHold();
+}
+
+// the menu opens (or comes up again): the boat holds still, so it stays wherever it is moved
+openMenu()
+{
+    if (menu == 0) menu = 1;
+    holdStill();
+    showMenu();
 }
 
 // the state of the saved waterline, for the Waterline menu
@@ -393,23 +430,25 @@ showMenu()
 {
     llListenRemove(menuListen);
     menuListen = llListen(menuChan, "", llGetOwner(), "");
-    menuUntil = llGetTime() + 60.0;
+    menuNext = llGetTime() + MENU_AGAIN;
     if (menu == 1)
     {
         string d = "OFF";
         if (driftOn) d = "ON";
         string k = "OFF";
         if (sinkOn) k = "ON";
-        llDialog(llGetOwner(), "Rowboat\n\nWaterline: how high the boat floats.\nDriver seat / Passenger seat: move where "
-            + "the sitter sits.\nDrift: the slow wandering. Sink: sinks when anyone sits. Both are saved.",
+        llDialog(llGetOwner(), "Rowboat\n\nThe boat holds still while this menu is open: move it where you want it.\nWaterline: "
+            + "how high the boat floats. Driver seat / Passenger seat: move where the sitter sits.\nDrift: the slow "
+            + "wandering. Sink: sinks when anyone sits. Both are saved. Close lets the boat go.",
             ["Drift: " + d, "Sink: " + k, "Close", "Waterline", "Driver seat", "Passenger seat"], menuChan);
     }
     else if (menu == 2)
     {
         llDialog(llGetOwner(), "Waterline\n\nThe centre of the boat is " + (string)llRound(lift * 100.0)
-            + " cm above the water (" + liftState() + ").\nUp / Down move the boat at once. Align: put the boat on the "
-            + "water level where it is now, level it, and make this its home. Save keeps the height, Default goes back "
-            + "to the computed one.", ["Save", "Default", "Back", "Down 5", "Down 1", "Align", "Up 5", "Up 1"], menuChan);
+            + " cm above the water (" + liftState() + ").\nUp / Down (cm) move the boat at once, or drag it yourself. "
+            + "Align: put the boat on the water level where it is now, level it, and make this its home. Save keeps the "
+            + "height, Default goes back to the computed one. Finish lets the boat go.",
+            ["Default", "Back", "Finish", "Down 1", "Down 5", "Save", "Up 5", "Up 1", "Align"], menuChan);
     }
     else
     {
@@ -419,8 +458,8 @@ showMenu()
         llDialog(llGetOwner(), llToUpper(llGetSubString(n, 0, 0)) + llGetSubString(n, 1, -1)
             + "\n\nMove the seat in the boat's directions (Bow = front, Left = the boat's left); the sitter moves at once. "
             + "Step now " + st + " (and the same number of degrees). Save keeps the place, Reset goes back to the saved "
-            + "one, Done lets the boat move again.",
-            ["Save", "Reset", "Done", "Turn L", "Turn R", "Step: " + st, "Left", "Right", "Down", "Bow", "Stern", "Up"],
+            + "one, Finish lets the boat go.",
+            ["Save", "Reset", "Finish", "Turn L", "Turn R", "Step: " + st, "Left", "Right", "Down", "Bow", "Stern", "Up"],
             menuChan);
     }
 }
@@ -433,28 +472,30 @@ mainMenu(string msg)
     {
         menu = 3;
         if (msg == "Passenger seat") menu = 4;
-        holdStill();
     }
     else if (msg == "Close")
     {
         closeMenu();
         return;
     }
-    else if (llGetSubString(msg, 0, 4) == "Drift")
+    else if (llGetSubString(msg, 0, 4) == "Drift")    // the boat is held, so both take effect when it is let go
     {
-        settle();                                 // the wander so far, with the old setting
         driftOn = !driftOn;
         llLinksetDataWrite("drift", (string)driftOn);
-        replan();
     }
     else if (llGetSubString(msg, 0, 3) == "Sink")
     {
-        settle();
         sinkOn = !sinkOn;
         llLinksetDataWrite("sink", (string)sinkOn);
-        replan();
     }
     showMenu();
+}
+
+// the waterline moves by d metres (the boat is held, so it is moved by hand here, and the motion later starts from there)
+raise(float d)
+{
+    lift += d;
+    llSetLinkPrimitiveParamsFast(LINK_THIS, [PRIM_POSITION, llGetPos() + <0.0, 0.0, d>]);
 }
 
 // one button of the Waterline menu
@@ -462,6 +503,11 @@ waterMenu(string msg)
 {
     integer k = llListFindList(["Up 5", "Up 1", "Down 1", "Down 5"], [msg]);
     if (msg == "Back") menu = 1;
+    else if (msg == "Finish")
+    {
+        closeMenu();
+        return;
+    }
     else if (msg == "Align")
     {
         align();
@@ -476,8 +522,7 @@ waterMenu(string msg)
     else if (msg == "Default")
     {
         llLinksetDataDelete("lift");
-        lift = DRAFT - hullLow;
-        replan();
+        raise(-DRAFT - hullLow - lift);
         llOwnerSay("Back to the computed waterline: " + (string)llRound(lift * 100.0) + " cm.");
     }
     else if (k >= 0)
@@ -485,17 +530,16 @@ waterMenu(string msg)
         float d = 0.05;
         if (k == 1 || k == 2) d = 0.01;
         if (k >= 2) d = -d;
-        lift += d;
-        replan();
+        raise(d);
     }
     showMenu();
 }
 
-// one button of a nudge menu
+// one button of a seat menu
 nudgeMenu(string msg)
 {
     integer s = menu - 3;
-    if (msg == "Done")
+    if (msg == "Finish")
     {
         closeMenu();
         return;
@@ -547,18 +591,16 @@ default
         llSetLinkPrimitiveParamsFast(LINK_SET, [PRIM_CLICK_ACTION, CLICK_ACTION_SIT]);    // a click anywhere on the boat sits
         llSetSitText("Sit");
 
-        home = llGetPos();
-        vector e = llRot2Euler(llGetRot());
-        homeYaw = e.z;
         vector low = llList2Vector(llGetBoundingBox(llGetKey()), 0);
         hullLow = low.z;                          // how far the hull bottom is below the root prim (a minus number)
         // saved settings; a missing key means the default
-        lift = DRAFT - hullLow;
+        lift = -DRAFT - hullLow;                  // the hull bottom is DRAFT under the water: root centre = -DRAFT - hullLow above it
         string v = llLinksetDataRead("lift");
         if (v != "") lift = (float)v;
         driftOn = llLinksetDataRead("drift") != "0";
         sinkOn = llLinksetDataRead("sink") != "0";
         driftAmt = (float)driftOn;
+        place();                                  // on the waterline here (a boat placed higher or lower is put right), level
         integer s;
         for (s = 0; s < 2; ++s)
         {
@@ -571,13 +613,13 @@ default
         queue = [];
         permFor = NULL_KEY;
         warned = FALSE;
-        nudge = FALSE;
+        held = FALSE;
         menu = 0;
         refreshSeats(TRUE);
 
         float water = llWater(ZERO_VECTOR);
-        llOwnerSay("Afloat on the water at " + (string)llRound(water) + " m. If you are editing the boat, "
-            + "close the edit window: it stands still while selected.");
+        llOwnerSay("Afloat on the water at " + (string)llRound(water) + " m. A boat that is selected stands still, and stays "
+            + "wherever you leave it.");
         if (llGround(ZERO_VECTOR) > water - SINK_DEPTH - 1.0)
             llOwnerSay("The water here is shallow: the boat will touch bottom before it is fully under.");
         menuChan = -1 - (integer)llFrand(2000000000.0);
@@ -590,6 +632,7 @@ default
         batchSeated = seated && sinkOn;
         nextBatch();
         llSetTimerEvent(1.0);
+        if (llGetAgentSize(llGetOwner()) != ZERO_VECTOR) openMenu();    // the menu comes up by itself, for the owner
     }
 
     on_rez(integer n)
@@ -615,7 +658,7 @@ default
                 llOwnerSay("Another script turned physics on. Remove the boat's other scripts.");
                 llSetStatus(STATUS_PHYSICS, FALSE);
             }
-            // start the new batch now, so sitting or standing shows at once (not while a nudge menu holds the boat)
+            // start the new batch now, so sitting or standing shows at once (not while a menu holds the boat)
             replan();
         }
     }
@@ -640,35 +683,32 @@ default
 
     touch_start(integer n)
     {
-        if (menuChan && llDetectedKey(0) == llGetOwner())
-        {
-            if (menu == 0) menu = 1;
-            showMenu();
-        }
+        if (menuChan && llDetectedKey(0) == llGetOwner()) openMenu();
     }
 
     listen(integer channel, string name, key id, string msg)
     {
-        if (channel == 9)
-        {
-            if (menu == 0) menu = 1;
-            showMenu();
-        }
+        if (channel == 9) openMenu();
         else if (menu == 1) mainMenu(msg);
         else if (menu == 2) waterMenu(msg);
         else if (menu >= 3) nudgeMenu(msg);
     }
 
-    // backup in case a batch ends without a moving_end; also the menu and permission time-outs
+    // backup in case a batch ends without a moving_end; the menu stays up (sent again now and then, closed if the owner
+    // has left, since nobody could answer it); and the permission time-out
     timer()
     {
         float t = llGetTime();
-        if (menu && t > menuUntil) closeMenu();
+        if (menu)
+        {
+            if (llGetAgentSize(llGetOwner()) == ZERO_VECTOR) closeMenu();
+            else if (t > menuNext) showMenu();
+        }
         if (permFor != NULL_KEY && t > permAt + 5.0)
         {
             permFor = NULL_KEY;
             nextPerm();
         }
-        if (!nudge && t > batchStart + FRAMES * FRAME + 1.0) nextBatch();
+        if (!held && t > batchStart + FRAMES * FRAME + 1.0) nextBatch();
     }
 }

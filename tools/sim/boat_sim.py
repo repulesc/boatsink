@@ -1,6 +1,7 @@
 # The rowboat's motion maths and saved-settings format (src/rowboat.lsl), ported to Python and run against a small
-# model of keyframed motion. Constants are read from the script itself. Checks: no jump at start, at Align or after a
-# nudge menu; drift on/off stays continuous; the sink timeline (and the sea-floor limit); rotation chaining; the Linkset
+# model of keyframed motion. Constants are read from the script itself. Checks: where the hull sits against the water (the
+# physical meaning of the saved height and of Up / Down), no jump at start, at Align or after a menu; a boat moved by hand
+# stays where it is; the menu holds the boat still; drift on/off stays continuous; the sink timeline (and the sea-floor limit); rotation chaining; the Linkset
 # Data text for lift / seat1 / seat2 and the sit-target maths for the Seat2 prim; the menu lists fit a dialog.
 # This checks the maths, not Second Life: how the simulator really plays keyframes is assumed (linear moves, turns
 # spread evenly), and the script has not been run in-world.
@@ -22,7 +23,7 @@ def const(name):
     return float(v)
 C = {n: const(n) for n in ("DRAFT", "HEAVE", "ROLL_DEG", "PITCH_DEG", "YAW_SWING_DEG", "DRIFT_RADIUS", "DRIFT_PERIOD",
                            "DRIFT_EASE", "SINK_TIME", "SINK_DEPTH", "SINK_PITCH", "SINK_ROLL", "RISE_TIME", "BOTTOM_GAP",
-                           "SEAT1_POS", "SEAT1_YAW", "SEAT2_POS", "SEAT2_YAW", "FRAME", "FRAMES")}
+                           "SEAT1_POS", "SEAT1_YAW", "SEAT2_POS", "SEAT2_YAW", "FRAME", "FRAMES", "MENU_AGAIN", "MOVED")}
 FRAME, FRAMES = C["FRAME"], int(C["FRAMES"])
 TWO_PI, D2R = 2 * math.pi, math.pi / 180
 
@@ -62,15 +63,16 @@ IDENT = (1.0, 0.0, 0.0, 0.0)
 class Boat:
     def __init__(s, water=20.0, ground=lambda p: 0.0, hull_low=-0.45, pos=(128.0, 128.0, None), yaw=0.5):
         s.water, s.ground, s.hullLow = water, ground, hull_low
-        s.lift = C["DRAFT"] - hull_low
+        s.lift = -C["DRAFT"] - hull_low                           # the hull bottom is DRAFT under the water
         z = water + s.lift if pos[2] is None else pos[2]
         s.pos, s.rot = (pos[0], pos[1], z), euler2rot(0, 0, yaw)
         s.now = 0.0
         s.frames, s.fi, s.ft, s.base_pos, s.base_rot, s.ended = [], 0, 0.0, s.pos, s.rot, False
-        s.seated = s.nudge = False
+        s.seated = s.held = False
         s.driftOn = s.sinkOn = True
         s.driftAmt, s.driftT, s.batchStart, s.batchSunk, s.batchSeated, s.t0, s.heldAt = 1.0, 0.0, 0.0, 0.0, False, 0.0, 0.0
         s.home, s.homeYaw = s.pos, yaw
+        s.moved = False                                           # the last nextBatch found the boat moved by hand
         s.first = None                                            # (move, turn angle) of the first keyframe of the last batch
 
     # -- the simulator --
@@ -114,8 +116,23 @@ class Boat:
         s.batchSunk = s.sunkAfter(t - s.batchStart)
         s.driftAmt = s.driftAfter(t - s.driftT)
         s.batchStart = s.driftT = t
+    def adoptMove(s):
+        t = s.now; pos = s.pos
+        sk = s.sunkAfter(t - s.batchStart)
+        want = s.pose(t - s.t0, sk, s.driftAfter(t - s.driftT), pos)[0]
+        off = vsub(pos, want)
+        if math.hypot(off[0], off[1]) < C["MOVED"] and abs(off[2]) < C["MOVED"]: return
+        s.moved = True
+        s.homeYaw, s.home, s.t0 = yaw_of(s.rot), pos, t
+        if sk < 0.001:
+            if abs(off[2]) >= C["MOVED"]: s.lift += off[2]
+        else:                                                     # sinking: its depth says how far down it really is
+            e = max(0.0, min(1.0, (s.water + s.lift - pos[2]) / C["SINK_DEPTH"]))
+            s.batchSunk = 0.5 - math.sin(math.asin(1.0 - 2.0 * e) / 3.0)
+            s.batchStart = t
     def nextBatch(s):
-        if s.nudge: return
+        if s.held: return
+        s.adoptMove()
         s.settle()
         s.batchSeated = s.seated and s.sinkOn
         start = s.pos; at = start; was = s.rot
@@ -129,24 +146,29 @@ class Boat:
         s.planned = (at, was)
         s.set_keyframed(frames)
     def replan(s):
-        if s.nudge: return
+        if s.held: return
         s.set_keyframed([]); s.nextBatch()
     def holdStill(s):
-        if s.nudge: return
-        s.settle(); s.heldAt = s.batchStart; s.nudge = True; s.set_keyframed([])
-    def endNudge(s):
+        if s.held: return
+        s.settle(); s.heldAt = s.batchStart; s.held = True; s.set_keyframed([])
+    def endHold(s):
         t = s.now
-        s.t0 += t - s.heldAt; s.batchStart = s.driftT = t; s.nudge = False; s.nextBatch()
-    def align(s):
-        s.set_keyframed([])
+        s.t0 += t - s.heldAt; s.batchStart = s.driftT = t; s.held = False; s.nextBatch()
+    def raise_(s, d):                                             # Up / Down while held: moved by hand, lift changes with it
+        s.lift += d; s.pos = vadd(s.pos, (0.0, 0.0, d))
+    def place(s):
         s.homeYaw = yaw_of(s.rot)
         s.home = (s.pos[0], s.pos[1], s.water + s.lift)
         s.pos, s.rot = s.home, euler2rot(0, 0, s.homeYaw)
+    def align(s):
+        s.set_keyframed([])
+        s.place()
         s.t0 = s.batchStart = s.driftT = s.now
         s.batchSunk = 0.0
+        if s.held: s.heldAt = s.t0
         s.nextBatch()
     def start(s):                                                 # state_entry
-        s.home, s.homeYaw = s.pos, yaw_of(s.rot)
+        s.place()
         s.t0 = s.batchStart = s.driftT = s.now = 0.0
         s.driftAmt = float(s.driftOn); s.batchSunk = 0.0
         s.batchSeated = s.seated and s.sinkOn
@@ -159,7 +181,7 @@ def run(b, until, events=(), dt=0.05):
         while ev and ev[0][0] <= b.now + 1e-9: ev.pop(0)[1](b)
         b.step(dt)
         if b.ended: b.ended = False; b.nextBatch()
-        elif not b.nudge and b.now > b.batchStart + FRAMES * FRAME + 1.0: b.nextBatch()
+        elif not b.held and b.now > b.batchStart + FRAMES * FRAME + 1.0: b.nextBatch()
         rec.append((b.now, b.pos, b.rot))
     return rec
 
@@ -174,14 +196,15 @@ for needle in ("float t = batchStart - t0;", "t0 = llGetTime();", "t0 += t - hel
                "batchSeated = seated && sinkOn;", "float floor = llGround(p - start) + BOTTOM_GAP - hullLow;",
                "p.z = llWater(ZERO_VECTOR) + lift - e * SINK_DEPTH + calm * heave;",
                "pose(t + k * FRAME, sunkAfter(k * FRAME), driftAfter(k * FRAME), start)",
-               "home.z = llWater(ZERO_VECTOR) + lift;", "lift = DRAFT - hullLow;", "llLinkSitTarget(link, p, r);",
+               "home.z = llWater(ZERO_VECTOR) + lift;", "lift = -DRAFT - hullLow;", "raise(-DRAFT - hullLow - lift);", "llLinkSitTarget(link, p, r);",
                'llLinksetDataWrite("lift", fix(lift, 3))', 'llLinksetDataWrite("drift"', 'llLinksetDataWrite("sink"',
                'llLinksetDataRead("seat" + (string)(s + 1))', 'llLinksetDataWrite("seat" + (string)(s + 1)'):
     check(needle in SRC, f"script: missing {needle!r}")
-check(re.search(r"nextBatch\(\)\s*\{\s*if \(nudge\) return;", SRC) is not None, "script: nextBatch does not stop while nudging")
-check(re.search(r"replan\(\)\s*\{\s*if \(nudge\) return;", SRC) is not None, "script: replan does not stop while nudging")
+check(re.search(r"nextBatch\(\)\s*\{\s*if \(held\) return;\s*adoptMove\(\);\s*settle\(\);", SRC) is not None, "script: nextBatch does not stop while held, or does not adopt a move first")
+check(re.search(r"replan\(\)\s*\{\s*if \(held\) return;", SRC) is not None, "script: replan does not stop while a menu holds the boat")
 check(re.search(r"wave\([^()]*,[^()]*,[^()]*\)", SRC) is None, "script: a wave still has a phase")
 check(re.search(r"llSitTarget\(", SRC) is None, "script: llSitTarget (one seat only) is still used")
+check("DRAFT - hullLow" not in SRC.replace("-DRAFT - hullLow", ""), "script: the old height formula (hull bottom ABOVE the water) is back")
 
 # ---- 1. no jump at start: the first keyframe is within a few centimetres and about a degree of rest ----
 b = Boat(); b.start()
@@ -282,18 +305,18 @@ b = Boat(); b.seated = True; b.start()
 for _ in range(120): b.step(0.05)                                   # one whole batch, no new one planned
 check(vlen(vsub(b.pos, b.planned[0])) < 1e-6 and angle(b.rot, b.planned[1]) < 1e-4, "a batch does not end where it was planned to end")
 
-# ---- 6. a nudge menu: the boat holds still, then carries on from where it stopped, without a jump ----
+# ---- 6. a menu holds the boat still, then it carries on from where it stopped, without a jump ----
 b = Boat(); b.seated = True; b.start(); run(b, 50.0)
 b.holdStill(); sunk_at_hold = b.batchSunk
 held = run(b, 170.0)
-check(max(vlen(vsub(p, held[0][1])) for t, p, r in held) < 1e-9, "nudge: the boat moved while held")
-b.endNudge(); mv, ang = b.first
+check(max(vlen(vsub(p, held[0][1])) for t, p, r in held) < 1e-9, "hold: the boat moved while held")
+b.endHold(); mv, ang = b.first
 print(f"nudge: after a 120 s hold the first keyframe moves {mv*100:.1f} cm and turns {ang:.2f} deg")
 check(mv < 0.12 and ang < 3.0, f"nudge: first keyframe after the hold moves {mv*100:.1f} cm, turns {ang:.2f} deg")
 check(abs(b.batchSunk - sunk_at_hold) < 1e-9, "nudge: the hold counted as sinking time")
 v, w = speeds(run(b, 230.0))
 check(v < 0.3 and w < 5.0, f"nudge: speed {v:.2f} m/s, {w:.1f} deg/s after the hold")
-b = Boat(); b.start(); run(b, 30); b.holdStill(); run(b, 90); b.endNudge()
+b = Boat(); b.start(); run(b, 30); b.holdStill(); run(b, 90); b.endHold()
 check(b.first[0] < 0.1, "nudge: the wander jumped after the hold")
 
 # ---- 7. Linkset Data text ----
@@ -321,8 +344,8 @@ for _ in range(500):
     check(max(abs(a - b2) for a, b2 in zip(back[0] + (back[1],), pos + (yaw,))) < 6e-5, f"seat round trip {pos} {yaw} -> {t!r}")
     lift = rng.uniform(-0.5, 1.5); lt = fix(lift, 3)
     check(re.fullmatch(r"-?\d+\.\d{3}", lt) is not None and abs(float(lt) - lift) < 6e-4, f"lift text {lt!r} for {lift}")
-check(fix(C["DRAFT"] + 0.45, 3) == "0.750" and fix(0.3, 3) == "0.300" and fix(-0.05, 3) == "-0.050", "lift text for plain values")
-lift0 = C["DRAFT"] + 0.45
+check(fix(0.75, 3) == "0.750" and fix(0.3, 3) == "0.300" and fix(-0.05, 3) == "-0.050", "lift text for plain values")
+lift0 = 0.6
 for step in (0.05, 0.01, -0.01, -0.05, 0.05):                          # Up/Down presses, then Save and read back
     lift0 += step
 check(abs(float(fix(lift0, 3)) - round(lift0, 3)) < 1e-9, "lift after Up/Down presses")
@@ -359,6 +382,7 @@ for _ in range(100):
 check("(p - llList2Vector(d, 0)) / cr" in SRC and "r = r / cr;" in SRC, "script: applySeat no longer does the Seat2 conversion")
 
 # ---- 9. the dialogs fit: at most 12 buttons, labels of 24 characters or fewer, text under 512 characters ----
+dialogs = []
 for m in re.finditer(r"llDialog\(", SRC):
     i = m.end(); depth = 1; j = i
     while depth:
@@ -373,12 +397,114 @@ for m in re.finditer(r"llDialog\(", SRC):
     lm = re.search(r"\[((?:[^\[\]])*)\],\s*menuChan\s*$", call.strip(), re.S)
     items = [x.strip() for x in lm.group(1).split(",")]
     check(1 <= len(items) <= 12, f"dialog at line {SRC[:m.start()].count(chr(10)) + 1}: {len(items)} buttons")
+    dialogs.append(items)
     for it in items:
         lit = re.findall(r'"((?:[^"\\]|\\.)*)"', it)
         check(len(lit[0]) + (3 if "+" in it else 0) <= 24, f"button label too long: {it}")
     lits = re.findall(r'"((?:[^"\\]|\\.)*)"', call[:lm.start()])
     total = sum(len(x) for x in lits) + 60                              # plus the numbers and the saved state
     check(total < 512, f"dialog text may reach {total} characters")
+
+# ---- 10. the saved height means what it says: the hull bottom is DRAFT under the water, and Up raises the boat ----
+for hl in (-0.45, -0.2, -0.8):
+    b = Boat(hull_low=hl, pos=(128.0, 128.0, 20.0 + 3.0)); b.start()          # placed 3 m too high: start puts it on the waterline
+    check(abs((b.pos[2] + hl) - (b.water - C["DRAFT"])) < 1e-9, f"waterline: hull bottom {b.pos[2] + hl - b.water:+.3f} m from the water, not -{C['DRAFT']}")
+    check(abs(b.pos[2] - (b.water + b.lift)) < 1e-9 and angle(b.rot, euler2rot(0, 0, yaw_of(b.rot))) < 1e-6, "waterline: start did not put the boat on the water level, level")
+def menu_delta(label):                                                  # the script's Up / Down buttons
+    k = ["Up 5", "Up 1", "Down 1", "Down 5"].index(label)
+    d = 0.05
+    if k in (1, 2): d = 0.01
+    if k >= 2: d = -d
+    return d
+check(re.search(r'llListFindList\(\["Up 5", "Up 1", "Down 1", "Down 5"\], \[msg\]\)', SRC) is not None, "script: the Up / Down button list changed")
+check(re.search(r"float d = 0\.05;\s*if \(k == 1 \|\| k == 2\) d = 0\.01;\s*if \(k >= 2\) d = -d;\s*raise\(d\);", SRC) is not None, "script: Up / Down steps changed")
+for label, want in (("Up 5", 0.05), ("Up 1", 0.01), ("Down 1", -0.01), ("Down 5", -0.05)):
+    b = Boat(); b.start(); b.holdStill(); z0, l0 = b.pos[2], b.lift
+    b.raise_(menu_delta(label))
+    check(abs((b.pos[2] - z0) - want) < 1e-12 and abs((b.lift - l0) - want) < 1e-12, f"waterline: {label} moved the boat {b.pos[2] - z0:+.3f} m, wanted {want:+.2f}")
+    b.endHold(); run(b, b.now + 30)
+    check(abs(b.pos[2] - (b.water + b.lift)) < 0.05, f"waterline: after {label} and Finish the boat is not at water + lift")
+# Default: back to the computed height by moving the boat the difference
+b = Boat(); b.start(); b.holdStill(); b.raise_(0.2); b.raise_(-C["DRAFT"] - b.hullLow - b.lift)
+check(abs(b.lift - (-C["DRAFT"] - b.hullLow)) < 1e-12, "waterline: Default does not go back to the computed height")
+
+# ---- 11. a boat moved by hand stays where it is (it used to glide back to its old home) ----
+def far(a, c): return math.hypot(a[0] - c[0], a[1] - c[1])
+b = Boat(); b.start(); run(b, 100)
+old_home = b.home; new = vadd(b.pos, (20.0, -15.0, 0.0))
+b.pos = new; b.set_keyframed([])                                          # dragged away; the editor holds the motion paused
+rec = run(b, 135)
+check(b.moved, "moved by hand: the script did not notice the boat had been moved")
+check(b.first[0] < 0.12, f"moved by hand: the first keyframe after the move is {b.first[0]*100:.1f} cm (it must not glide back)")
+check(max(far(p, new) for t, p, r in rec if t > 101) < C["DRIFT_RADIUS"] * 2 + 1.0 and min(far(p, old_home) for t, p, r in rec if t > 101) > 15.0,
+      "moved by hand: the boat went back towards its old home")
+check(abs(b.home[0] - new[0]) < 1e-9 and abs(b.home[1] - new[1]) < 1e-9, "moved by hand: the new spot is not home")
+v, w = speeds(run(b, 200)); check(v < 0.3 and w < 5.0, f"moved by hand: speed {v:.2f} m/s, {w:.1f} deg/s afterwards")
+# held in the editor for a long while without being moved: no leap either
+b = Boat(); b.start(); run(b, 100); b.pos = b.pos; b.set_keyframed([]); run(b, 160)
+check(b.first[0] < 0.12, f"paused 60 s: the first keyframe afterwards moves {b.first[0]*100:.1f} cm")
+# moved up by hand while afloat: the new height is the waterline
+b = Boat(); b.start(); run(b, 100); lift0 = b.lift
+b.pos = vadd(b.pos, (0.0, 0.0, 1.0)); b.set_keyframed([]); rec = run(b, 170)
+check(abs(b.lift - (lift0 + 1.0)) < 0.06, f"raised by hand: lift {b.lift - lift0:+.2f} m, wanted +1.00")
+check(all(abs(p[2] - (b.water + b.lift)) < 0.06 for t, p, r in rec if t > 108), "raised by hand: the boat went back down")
+# a small difference is not a move (nothing to adopt in normal running)
+b = Boat(); b.start(); rec = run(b, 400); check(not b.moved, "normal running was taken for a move by hand")
+for seated in (False, True):
+    b = Boat(); b.seated = seated; b.start()
+    def toggles(bt): bt.settle(); bt.driftOn = not bt.driftOn; bt.replan()
+    run(b, 600, [(100.0, toggles), (160.0, toggles), (200.0, lambda bt: (setattr(bt, "seated", not bt.seated), bt.replan())),
+                 (330.0, lambda bt: (setattr(bt, "seated", not bt.seated), bt.replan()))])
+    check(not b.moved, f"normal running with toggles and sitting (seated={seated}) was taken for a move by hand")
+# sinking, paused while selected for 20 s: the depth it really has becomes its depth; the height setting is not touched
+b = Boat(); b.seated = True; b.start(); run(b, 60); lift0, z0 = b.lift, b.pos[2]
+b.set_keyframed([]); rec = run(b, 82)
+check(abs(b.lift - lift0) < 1e-12, "sinking, paused: the height setting was changed")
+check(b.first[0] < 0.15, f"sinking, paused 20 s: the first keyframe afterwards moves {b.first[0]*100:.1f} cm")
+rec = run(b, 200); check(min(p[2] for t, p, r in rec) > b.water - C["SINK_DEPTH"] - 0.2 and abs(rec[-1][1][2] - (b.water + b.lift - C["SINK_DEPTH"])) < 0.2,
+                         "sinking, paused: it did not carry on down to the full depth")
+
+# ---- 12. the menu holds the boat; moving it meanwhile, then Finish, leaves it where it was put ----
+b = Boat(); b.seated = True; b.start(); run(b, 40)
+b.holdStill(); frozen = b.pos; sunk_then = b.batchSunk
+rec = run(b, 100)
+check(all(p == frozen for t, p, r in rec), "menu: the boat moved while the menu was open")
+b.pos = vadd(b.pos, (7.0, 3.0, 0.0)); new = b.pos                         # dragged while the menu is open
+b.raise_(0.05); b.raise_(0.05)
+rec = run(b, 400)
+check(b.batchSunk == sunk_then, "menu: the hold counted as sinking time")
+b.endHold(); mv = b.first[0]
+check(mv < 0.15, f"menu Finish: the first keyframe moves {mv*100:.1f} cm")
+rec = run(b, b.now + 120)
+check(max(far(p, new) for t, p, r in rec) < C["DRIFT_RADIUS"] * 2 + 1.0, "menu Finish: the boat did not stay where it was put")
+v, w = speeds(rec); check(v < 0.5 and w < 5.0, f"menu Finish: speed {v:.2f} m/s, {w:.1f} deg/s")
+# Drift and Sink switched in the menu (held): they take effect at Finish, without a jump
+b = Boat(); b.start(); run(b, 50); b.holdStill(); b.driftOn = False; b.sinkOn = False; run(b, 80); b.endHold()
+check(b.first[0] < 0.12, "menu: switching Drift off in the menu made the boat jump at Finish")
+rec = run(b, b.now + 120); check(max(far(p, b.home) for t, p, r in rec if t > b.now - 60) < 0.05, "menu: Drift off, but the boat kept wandering")
+
+# ---- 13. the menu in the script: opens by itself, stays open until Finish or Close, holds the boat ----
+check(re.search(r"llSetTimerEvent\(1\.0\);\s*if \(llGetAgentSize\(llGetOwner\(\)\) != ZERO_VECTOR\) openMenu\(\);", SRC) is not None, "script: the menu does not open by itself at start")
+check(re.search(r"openMenu\(\)\s*\{\s*if \(menu == 0\) menu = 1;\s*holdStill\(\);\s*showMenu\(\);\s*\}", SRC) is not None, "script: openMenu does not hold the boat")
+check(SRC.count("openMenu();") >= 3, "script: touch and /9 boat do not open the menu")
+check("menuUntil" not in SRC and "t > menuNext) showMenu();" in SRC and "== ZERO_VECTOR) closeMenu();" in SRC, "script: the menu still times out (or is not sent again, or not closed when the owner leaves)")
+check(len(re.findall(r'"Finish"', SRC)) >= 3 and '"Done"' not in SRC, "script: Finish is missing from the Waterline or seat menus")
+check('"Close"' in SRC and re.search(r'msg == "Close"\)\s*\{\s*closeMenu\(\);\s*return;', SRC) is not None, "script: Close does not end the menu")
+check(len(re.findall(r'msg == "Finish"\)\s*\{\s*closeMenu\(\);\s*return;', SRC)) == 2, "script: Finish does not end the menu in both submenus")
+check(re.search(r"closeMenu\(\)\s*\{[^}]*if \(held\) endHold\(\);", SRC, re.S) is not None, "script: closing the menu does not let the boat go")
+check(C["MENU_AGAIN"] >= 60.0, "script: the dialog is sent again too often")
+# after every button the dialog comes back (nothing in the three menu handlers returns without it, except Finish / Close)
+for fn in ("mainMenu", "waterMenu", "nudgeMenu"):
+    body = re.search(fn + r"\(string msg\)\s*\{(.*?)\n\}\n", SRC, re.S).group(1)
+    check(body.rstrip().endswith("showMenu();"), f"script: {fn} does not show the menu again after a button")
+    check(body.count("return;") == body.count("closeMenu();\n        return;"), f"script: {fn} returns without the menu being closed")
+
+check(len(dialogs) == 3, f"expected 3 dialogs (main, Waterline, seat), found {len(dialogs)}")
+if len(dialogs) == 3:
+    check(any(i == '"Close"' for i in dialogs[0]), "main menu has no Close button")
+    check(any(i == '"Finish"' for i in dialogs[1]), "Waterline menu has no Finish button")
+    check(any(i == '"Finish"' for i in dialogs[2]), "seat menu has no Finish button")
+    check(all(len(set(d)) == len(d) for d in dialogs), "a dialog has two buttons with the same label")
 
 print("boat checks: ALL PASS" if ok else "boat checks: FAILED")
 raise SystemExit(0 if ok else 1)

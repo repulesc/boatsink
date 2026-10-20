@@ -4,8 +4,9 @@ A fun, dead-end rowboat for Second Life: no oars, nowhere to go. It floats on th
 drift, can slowly sink with whoever sits in it, and seats two people (a driver on the rower's bench and a passenger
 facing them), each with their own seated pose.
 
-- Owner menu (right-click > Touch, or `/9 boat`): calibrate and save the waterline, nudge and save each seat,
-  turn Drift and Sink on or off.
+- Owner menu: opens by itself and stays open until Finish or Close (right-click > Touch, or `/9 boat`, brings it back).
+  The boat holds still while it is open. Calibrate and save the waterline, nudge and save each seat, turn Drift and Sink
+  on or off.
 - Everything saved lives in the boat itself (Linkset Data), so it survives script resets and copies.
 
 **Status:** under construction, nothing is tested in Second Life yet. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for
@@ -22,7 +23,7 @@ the order of work and the in-world test list, and [`docs/SPEC.md`](docs/SPEC.md)
    so expect to adjust them (`anims/preview.png` shows the intended poses).
 5. Put the boat on open water and drop `rowboat.lsl` and the two animations into the **root prim**. Close the edit
    window: Second Life freezes this kind of motion while the boat is selected.
-6. Open the owner menu (right-click the boat > Touch, or say `/9 boat`): set the waterline and each seat, and press Save.
+6. The owner menu opens by itself: set the waterline (Up / Down, Save) and each seat (nudge, Save), then press Finish.
 
 | Path | Contents |
 |---|---|

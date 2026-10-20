@@ -13,26 +13,36 @@ two animation files. This document is the source of truth; `ROADMAP.md` is the o
 
 ## 2. Menus (owner only)
 
-Dialogs time out after 60 s. Button labels are 24 characters or fewer. A dialog has at most 12 buttons.
+**The menu opens by itself** when the script starts (if the owner is in the region), and again on right-click > Touch or
+`/9 boat`. It **stays open until the owner presses `Finish` or `Close`**: no time-out, the dialog comes back after every
+button, and it is sent again after `MENU_AGAIN` (120 s) without a button (Second Life cannot keep a dialog on screen, and
+closing one with Ignore sends nothing). It is closed by the script only if the owner leaves the region, since nobody
+could answer it. `Finish` and `Close` do the same: end the menu and let the boat go.
+
+**The boat holds still while any menu is open** (keyframed motion stopped, the motion clock stopped with it, no sinking
+time counted), so it stays wherever the owner moves it. Drift and Sink switched in the menu take effect when the boat
+is let go.
+
+Button labels are 24 characters or fewer. A dialog has at most 12 buttons.
 
 **Main:** `Waterline`, `Driver seat`, `Passenger seat`, `Drift: ON|OFF` (shows the current state, press toggles and
 saves), `Sink: ON|OFF` (same), `Close`.
 
-**Waterline:** `Up 5`, `Up 1`, `Down 1`, `Down 5` (centimetres; the boat moves at once), `Align`, `Save`, `Default`,
-`Back`. The text shows the current height of the root prim's centre above the water, in cm, and says whether it is
+**Waterline:** `Up 5`, `Up 1`, `Down 1`, `Down 5` (centimetres; **Up raises the boat**, Down lowers it, at once), `Align`,
+`Save`, `Default`, `Back`, `Finish`. The text shows the current height of the root prim's centre above the water, in cm, and says whether it is
 saved.
 - `Align`: put the boat on the water level where it is now, level it, make this spot its home (section 5).
 - `Save`: write the height to Linkset Data. `Default`: delete the saved value and go back to the computed default.
 
 **Driver seat / Passenger seat (nudge menu):** `Bow`, `Stern`, `Left`, `Right`, `Up`, `Down`, `Turn L`, `Turn R`,
 `Step: 5 cm`|`Step: 1 cm` (toggles coarse/fine; coarse = 5 cm and 5 degrees, fine = 1 cm and 1 degree), `Save`,
-`Reset`, `Done`. That is exactly 12 buttons.
+`Reset`, `Finish`. That is exactly 12 buttons.
 - Directions are in the **boat's** frame: Bow = toward the front (+X of the root prim), Left = +Y.
 - Each press moves the seated avatar **at once** (real time) and updates the seat's sit target for the next sitter.
 - `Save` writes the seat offset to Linkset Data. `Reset` restores the saved offset (or the default if none).
-  `Done` leaves the menu.
-- While a nudge menu is open the boat **holds still** (keyframed motion stopped), because Second Life does not let a
-  script move a seated avatar while keyframed motion is running. `Done`, or the dialog timing out, restarts it.
+  `Finish` ends the menu.
+- The boat holds still here for a second reason too: Second Life does not let a script move a seated avatar while
+  keyframed motion is running.
 - If nobody sits in that seat the menu still works (the offset applies to the next sitter) but says so in chat.
 
 ## 3. Saved settings (Linkset Data)
@@ -42,7 +52,7 @@ strings. Missing key (read returns `""`) = use the default.
 
 | Key | Value | Default |
 |---|---|---|
-| `lift` | metres from the water surface up to the root prim's centre, `"%.3f"` | `DRAFT - hullLow` (computed at start) |
+| `lift` | metres from the water surface up to the root prim's centre, `"%.3f"` | `-DRAFT - hullLow` (computed at start) |
 | `drift` | `"1"` or `"0"` | on |
 | `sink` | `"1"` or `"0"` | on |
 | `seat1` | `"x y z yawDeg"` (sit-target offset in the root prim's frame, yaw in degrees, 4 decimals) | `SEAT1_POS`, `SEAT1_YAW` |
@@ -53,7 +63,7 @@ the moment the script starts (a seated avatar can change it). `hullLow` (the hul
 `llGetBoundingBox`) is still measured at start, only to keep the hull off the sea floor and for the default.
 
 Defaults to put at the top of the script (all tunable constants, the owner will nudge them anyway):
-`DRAFT = 0.30`, `SEAT1_POS = <-0.25, 0.0, 0.20>`, `SEAT1_YAW = 0.0`, `SEAT2_POS = <0.85, 0.0, 0.20>`,
+`DRAFT = 0.15` (metres the hull bottom is **under** the water), `SEAT1_POS = <-0.25, 0.0, 0.20>`, `SEAT1_YAW = 0.0`, `SEAT2_POS = <0.85, 0.0, 0.20>`,
 `SEAT2_YAW = 180.0` (the passenger faces the driver), drift/sink on.
 
 ## 4. Seats and animations
@@ -104,11 +114,25 @@ Changes from v1:
    `Align`) and feed every wave `t - t0`, with phase 0 in all of them, so the whole motion starts from the neutral pose
    at `t0`.
 4. The hull floor check uses `hullLow`: `p.z >= llGround(...) + BOTTOM_GAP - hullLow`.
-5. Height is `llWater(ZERO_VECTOR) + lift`, with `lift` from section 3.
+5. Height is `llWater(ZERO_VECTOR) + lift`, with `lift` from section 3. The default is `lift = -DRAFT - hullLow` (the hull
+   bottom is `root z + hullLow`, and it must be `DRAFT` under the water). v1 and the first v2 had `DRAFT - hullLow`,
+   which puts the hull bottom `DRAFT` **above** the water: the boat hovered, and in v1 (whose menu changed the draft)
+   Higher lowered the boat and Lower raised it. Up / Down change `lift` directly: Up is `lift + d`.
 6. `Align`: stop the motion, read the yaw, `home = llGetPos()`, set position `<x, y, water + lift>` and the rotation
    to the pure yaw with `llSetLinkPrimitiveParamsFast(LINK_THIS, [PRIM_POSITION, ..., PRIM_ROTATION, ...])`, set
    `t0 = llGetTime()`, restart the batches with zero sinking.
-7. While a nudge menu is open (`nudge == TRUE`): no new batches (`moving_end`, the timer and `changed` must check it).
+7. While a menu is open (`held == TRUE`): no new batches (`moving_end`, the timer and `changed` must check it). Up / Down
+   then move the boat by hand (`PRIM_POSITION`, same step as `lift`), and `Finish` / `Close` restart the motion from where
+   the boat is (the clock continues where it stopped).
+9. **A boat moved by hand stays where it is** (`adoptMove()`, first thing in `nextBatch()`). The motion always knows
+   where the boat should be (`pose()` at the current time); if the real position is `MOVED` (0.15 m) or more away, the
+   boat was moved (dragged in the editor, held while selected, a menu hold) and the motion must not steer it back to
+   the old home: `home` = where it is, `homeYaw` = its yaw, `t0` = now. Afloat, a height difference of `MOVED` or more
+   becomes the new `lift` (Save keeps it); while sinking the height is not a setting, so the depth it really has
+   becomes its sink progress (inverse of the smoothstep) and `lift` is left alone. Without this, the next batch (every
+   6 s, or the 1 s timer backup) planned from the new spot toward the old home: the boat snapped back.
+10. At start the boat is put on the waterline where it is, level (`place()`, shared with `Align`), so the first
+    `adoptMove()` finds nothing to adopt and a saved `lift` is never overwritten by wherever the boat was left.
 8. `CHANGED_OWNER` resets the script. Other scripts turning physics on: keep the v1 warning.
 
 ## 6. Animations (`anims/`)
@@ -157,7 +181,10 @@ poses can be looked at before uploading. These files are **untested in Second Li
 - `tools/sim/boat_sim.py`: pure-Python port of the motion maths: no jump at start or at `Align` (first keyframe within
   a few centimetres and 1 degree of rest), drift toggling stays continuous (speed below 0.3 m/s), the sink timeline
   (about 0.8 m after 30 s, 3 m after 90 s, never below the floor), rotation chaining (`r / was` then `* was` gives `r`
-  back), and the Linkset Data string round trip for `seat1`/`seat2`/`lift`.
+  back), the Linkset Data string round trip for `seat1`/`seat2`/`lift`, the saved height's physical meaning (hull bottom
+  `DRAFT` under the water; Up raises), a boat moved by hand or held for a minute staying where it is (afloat and
+  sinking), the menu holding the boat and letting it go smoothly at Finish, and the menu's behaviour in the script text
+  (opens at start, no time-out, Finish and Close, the dialog comes back after each button).
 - `tools/sim/anim_test.py`: reads each `.anim` back with an independent parser written from section 6, checks the header,
   the joint list, that every quaternion has w >= 0 and unit length, then runs forward kinematics and checks the pose
   (driver knees above the hips and feet higher than an ordinary sit; passenger torso leaning back; hands near the
