@@ -21,7 +21,7 @@ Order of work for the rowboat. `SPEC.md` has the details of each step.
 - [x] `anims/rowboat_driver.anim`, `anims/rowboat_passenger.anim`, `anims/preview.png`.
 
 ## 3. Checks
-- [ ] `tools/sim/boat_sim.py`, `tools/sim/anim_test.py`, CI workflow runs them with `tools/lslcheck.sh`.
+- [x] `tools/sim/boat_sim.py`, `tools/sim/anim_test.py`, CI workflow runs them with `tools/lslcheck.sh`.
 
 ## 4. In-world test (the owner; nothing above is tested in Second Life yet)
 Set-up: remove the boat's other scripts; link a small invisible prim named `Seat2` (about 0.1 m cube, 100% transparent,
