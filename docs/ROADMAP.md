@@ -9,19 +9,19 @@ Order of work for the rowboat. `SPEC.md` has the details of each step.
       Data, sink when anyone sits.
 
 ## 1. Script v2 (`src/rowboat.lsl`)
-- [ ] Settings layer: read/write `lift`, `drift`, `sink`, `seat1`, `seat2` (Linkset Data), with defaults.
-- [ ] Waterline menu: Up/Down 5 and 1 cm, Align, Save, Default. Fix the Align jump (`t0`).
-- [ ] Two seats: `Seat2` lookup, `llLinkSitTarget`, sitter tracking, animation permission queue.
-- [ ] Nudge menu per seat: live move, step toggle, Save, Reset, Done; boat holds still meanwhile.
-- [ ] Drift and Sink toggles (drift eases in and out).
-- [ ] Compiles with `tools/lslcheck.sh`, at least 15 KB free.
+- [x] Settings layer: read/write `lift`, `drift`, `sink`, `seat1`, `seat2` (Linkset Data), with defaults.
+- [x] Waterline menu: Up/Down 5 and 1 cm, Align, Save, Default. Fix the Align jump (`t0`).
+- [x] Two seats: `Seat2` lookup, `llLinkSitTarget`, sitter tracking, animation permission queue.
+- [x] Nudge menu per seat: live move, step toggle, Save, Reset, Finish; boat holds still meanwhile.
+- [x] Drift and Sink toggles (drift eases in and out).
+- [x] Compiles with `tools/lslcheck.sh`, at least 15 KB free.
 
 ## 2. Animations (`tools/make_anims.py`, `anims/`)
-- [ ] `.anim` writer, driver and passenger poses from named angles, forward-kinematics hand placement.
-- [ ] `anims/rowboat_driver.anim`, `anims/rowboat_passenger.anim`, `anims/preview.png`.
+- [x] `.anim` writer, driver and passenger poses from named angles, forward-kinematics hand placement.
+- [x] `anims/rowboat_driver.anim`, `anims/rowboat_passenger.anim`, `anims/preview.png`.
 
 ## 3. Checks
-- [ ] `tools/sim/boat_sim.py`, `tools/sim/anim_test.py`, CI workflow runs them with `tools/lslcheck.sh`.
+- [x] `tools/sim/boat_sim.py`, `tools/sim/anim_test.py`, CI workflow runs them with `tools/lslcheck.sh`.
 
 ## 4. In-world test (the owner; nothing above is tested in Second Life yet)
 Set-up: remove the boat's other scripts; link a small invisible prim named `Seat2` (about 0.1 m cube, 100% transparent,
@@ -34,6 +34,13 @@ phantom) to the boat; upload the two `.anim` files, name them `rowboat_driver` a
 - [ ] Sink off: sitting does nothing; on: slow sink over about 90 s, comes back up after everyone stands.
 - [ ] Align after moving the boat by hand: no leap or spin.
 - [ ] Say what is off (pose, heights, anything that errors in chat) and it gets fixed.
+
+## 5. Fixes after the first try (alignment)
+- [x] Height sign: `lift` was `DRAFT - hullLow` (hull bottom above the water, Higher/Lower reversed); now `-DRAFT - hullLow`.
+- [x] Menu opens by itself, stays open until Finish or Close (no time-out), boat holds still meanwhile.
+- [x] A boat moved by hand stays where it is (no snap back to the old home), also when selected in the editor.
+- [ ] In-world: open the menu, drag the boat somewhere, press Up/Down, Align, Finish: it stays where you put it, and the
+      hull sits in the water at the height you saved. Select the boat without the menu, move it, deselect: it stays.
 
 ## Later (not now)
 - Pitch/roll nudge for the seats, a third seat, a stand-up animation, splash particles and creaking sounds, a "sink
