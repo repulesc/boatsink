@@ -54,6 +54,7 @@ integer batchSeated;          // that batch was sinking (someone sat and Sink is
 list    seatPos = [ZERO_VECTOR, ZERO_VECTOR];   // current sit-target offsets, root prim's frame
 list    seatYaw = [0.0, 0.0];                   // degrees
 list    seatWho = [NULL_KEY, NULL_KEY];         // who sits there now
+integer rootLink;             // link number of the root prim: 0 on a boat of one prim, 1 on a linked boat
 integer seat2Link;            // link number of the prim named Seat2, 0 = none
 integer warned;               // the owner has been told that Seat2 is missing
 list    queue;                // [avatar, seat, ...] waiting for animation permission
@@ -254,9 +255,12 @@ setSeat(integer s, vector pos, float yaw)
 // the sit target of a seat from its offset (given in the root prim's frame; Seat2's own frame is worked out here)
 applySeat(integer s)
 {
-    integer link = LINK_ROOT;
-    if (s == 1) link = seat2Link;
-    if (link == 0) return;
+    integer link = rootLink;
+    if (s == 1)
+    {
+        link = seat2Link;
+        if (link == 0) return;
+    }
     vector p = llList2Vector(seatPos, s);
     rotation r = llEuler2Rot(<0.0, 0.0, llList2Float(seatYaw, s) * DEG_TO_RAD>);
     if (s == 1)
@@ -309,6 +313,7 @@ string animOf(integer s)
 // find Seat2, set the sit targets, see who sits where; an empty seat (or force) gets its sit target set again
 refreshSeats(integer force)
 {
+    rootLink = llGetLinkNumber();             // this script is in the root prim (0 if the boat is a single prim)
     seat2Link = 0;
     integer i;
     integer n = llGetObjectPrimCount(llGetKey());
@@ -326,7 +331,7 @@ refreshSeats(integer force)
     for (s = 0; s < 2; ++s)
     {
         key who = NULL_KEY;
-        if (s == 0) who = llAvatarOnLinkSitTarget(LINK_ROOT);
+        if (s == 0) who = llAvatarOnLinkSitTarget(rootLink);
         else if (seat2Link) who = llAvatarOnLinkSitTarget(seat2Link);
         if (who == NULL_KEY || force) applySeat(s);
         if (who != llList2Key(seatWho, s))

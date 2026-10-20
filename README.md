@@ -11,6 +11,19 @@ facing them), each with their own seated pose.
 **Status:** under construction, nothing is tested in Second Life yet. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for
 the order of work and the in-world test list, and [`docs/SPEC.md`](docs/SPEC.md) for how it works.
 
+## Setting it up in-world
+1. **Remove every other script from the boat** (a driving script turns physics on when someone sits, and a physical boat
+   cannot be moved this way).
+2. The boat's front must point along the root prim's **+X** (the red arrow in Build mode with Local axes).
+3. **Second seat:** link a small invisible prim (about 0.1 m cube, 100% transparent, phantom) to the boat and name it
+   `Seat2`. Without it the boat is a one-seater and says so in chat.
+4. **Animations:** upload `anims/rowboat_driver.anim` and `anims/rowboat_passenger.anim` (Build > Upload > Animation; a
+   small fee). Name them exactly `rowboat_driver` and `rowboat_passenger`. They have not been seen on an avatar yet,
+   so expect to adjust them (`anims/preview.png` shows the intended poses).
+5. Put the boat on open water and drop `rowboat.lsl` and the two animations into the **root prim**. Close the edit
+   window: Second Life freezes this kind of motion while the boat is selected.
+6. Open the owner menu (right-click the boat > Touch, or say `/9 boat`): set the waterline and each seat, and press Save.
+
 | Path | Contents |
 |---|---|
 | `src/rowboat.lsl` | The one script (goes in the boat's root prim) |

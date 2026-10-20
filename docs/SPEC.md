@@ -58,7 +58,8 @@ Defaults to put at the top of the script (all tunable constants, the owner will 
 
 ## 4. Seats and animations
 
-- Seat 1 = the root prim (`LINK_ROOT`). Seat 2 = a child prim **named `Seat2`**: a small invisible prim the owner
+- Seat 1 = the root prim, addressed by `llGetLinkNumber()` of the script (0 on a boat of one prim, 1 on a linked boat;
+  `LINK_ROOT` is not safe for a single prim). Seat 2 = a child prim **named `Seat2`**: a small invisible prim the owner
   links to the boat (found by name among links 2..`llGetObjectPrimCount(llGetKey())`; refreshed on `CHANGED_LINK`). No
   `Seat2` prim: the boat is a one-seater and the owner is told once, in chat, how to add it.
 - Sit targets are set with `llLinkSitTarget(link, pos, rot)`. Second Life seats the next person on the lowest-numbered
@@ -118,7 +119,8 @@ endian): `U16 version=1`, `U16 sub_version=0`, `S32 base_priority`, `F32 duratio
 `F32 loop_in`, `F32 loop_out`, `S32 loop`, `F32 ease_in`, `F32 ease_out`, `U32 hand_pose`, `U32 num_joints`; per
 joint: name (NUL-terminated), `S32 priority`, `S32 num_rot_keys`, keys of (`U16 time`, `U16 x`, `U16 y`, `U16 z`) where
 0..65535 maps to -1..+1 for the quaternion x, y, z (w is rebuilt and must be >= 0, so negate the quaternion if it is
-not), `S32 num_pos_keys` (use 0), then `S32 num_constraints` (use 0). Upload limit 250,000 bytes.
+not), `S32 num_pos_keys` (use 0). After the **last** joint, **once**: `S32 num_constraints` (use 0). Upload limit
+250,000 bytes.
 
 Settings: priority 4 on every joint and as base priority, loop on, `loop_in = 0`, `loop_out = duration`, duration 1.0 s,
 ease in/out 0.5 s, `hand_pose = 1` (relaxed). Two identical rotation keys (time 0 and 65535) per joint: a held pose.
